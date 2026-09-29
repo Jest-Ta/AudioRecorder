@@ -1,0 +1,2 @@
+# The GUI itself uses only the Python standard library.
+# Live metering intentionally reuses PyAudioWPatch from OMR's uv tool environment.
