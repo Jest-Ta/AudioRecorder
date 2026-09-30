@@ -368,14 +368,29 @@ class RecorderApp:
             self.loopback_var.set(loopback.display_name)
             self.settings.loopback_name = loopback.name
         self.refresh_button.configure(state="normal")
-        can_record = bool(mic and loopback)
+        # Do not make the GUI's enumeration result a recording gate. OMR can
+        # still choose Windows defaults if our device list is empty.
+        can_record = self.backend is not None
         self.record_button.configure(state="normal" if can_record else "disabled")
         if missing:
-            self.message_var.set(f"The {' and '.join(missing)} was unavailable; a current default was selected.")
-        elif can_record:
-            self.message_var.set("Ready")
+            if mic and loopback:
+                self.message_var.set(
+                    f"The {' and '.join(missing)} was unavailable; a current default was selected."
+                )
+            elif mic or loopback:
+                self.message_var.set(
+                    f"The {' and '.join(missing)} was unavailable; recording will use available audio."
+                )
+            else:
+                self.message_var.set("No devices listed; OMR will try the Windows default devices")
+        elif mic and loopback:
+            self.message_var.set("Ready · microphone and system audio will be mixed equally")
+        elif mic:
+            self.message_var.set("System audio is unavailable; microphone-only capture will be used")
+        elif loopback:
+            self.message_var.set("Microphone is unavailable; system-audio-only capture will be used")
         else:
-            self.message_var.set("A microphone and system-audio source are required.")
+            self.message_var.set("No sources listed; OMR will try the Windows default devices")
         self._save_settings()
         self._schedule_meter_restart()
 
@@ -413,9 +428,6 @@ class RecorderApp:
             return
         mic = self._selected_device(self.mic_devices, self.mic_var.get())
         loopback = self._selected_device(self.loopback_devices, self.loopback_var.get())
-        if not mic or not loopback:
-            messagebox.showerror("Audio sources", "Select both audio sources first.", parent=self.root)
-            return
         output_dir = Path(os.path.expandvars(self.output_var.get().strip())).expanduser()
         if not self.output_var.get().strip():
             messagebox.showerror("Output directory", "Choose an output directory first.", parent=self.root)
@@ -426,8 +438,10 @@ class RecorderApp:
         self._process_launched = False
         self._cancelled_startup = False
         self.backend.clear_technical_log()
-        self.settings.mic_name = mic.name
-        self.settings.loopback_name = loopback.name
+        if mic:
+            self.settings.mic_name = mic.name
+        if loopback:
+            self.settings.loopback_name = loopback.name
         self.settings.output_directory = str(output_dir)
         self._save_settings()
         self._set_state("PREPARING")
@@ -436,25 +450,32 @@ class RecorderApp:
         self.mic_meter.reset()
         self.loopback_meter.reset()
 
-        selected_mic_name = mic.name
-        selected_loopback_name = loopback.name
+        selected_mic_name = mic.name if mic else self.settings.mic_name
+        selected_loopback_name = loopback.name if loopback else self.settings.loopback_name
 
         def worker() -> None:
             assert self.backend is not None
             try:
-                current = self.backend.enumerate_devices()
+                try:
+                    current = self.backend.enumerate_devices()
+                except BackendError:
+                    # If this bridge cannot enumerate, let OMR do its own
+                    # device discovery with the Windows default devices.
+                    current = []
                 current_mics = [device for device in current if device.kind == "input"]
                 current_loops = [device for device in current if device.kind == "loopback"]
-                current_mic = next((d for d in current_mics if d.name == selected_mic_name), None)
-                current_loop = next((d for d in current_loops if d.name == selected_loopback_name), None)
-                if current_mic is None:
-                    raise BackendError("The selected microphone is no longer available. Refresh devices.")
-                if current_loop is None:
-                    raise BackendError("The selected system-audio source is no longer available. Refresh devices.")
+                current_mic = next(
+                    (d for d in current_mics if d.name == selected_mic_name),
+                    find_device_by_name(current_mics, selected_mic_name),
+                )
+                current_loop = next(
+                    (d for d in current_loops if d.name == selected_loopback_name),
+                    find_device_by_name(current_loops, selected_loopback_name),
+                )
                 bitrate = int(self.bitrate_var.get().split()[0])
                 options = RecordingOptions(
-                    mic_index=current_mic.index,
-                    loopback_index=current_loop.index,
+                    mic_index=current_mic.index if current_mic else None,
+                    loopback_index=current_loop.index if current_loop else None,
                     output_directory=output_dir,
                     output_format=self.format_var.get(),
                     bitrate=bitrate,
@@ -488,8 +509,7 @@ class RecorderApp:
         self._set_state("RECORDING")
         output_name = self._last_output.name if self._last_output else "output file"
         self.message_var.set(f"Recording to {output_name}")
-        # The meters use separate shared-mode streams and join only after OMR
-        # confirms its own capture streams are open.
+        # Keep the live shared-mode meters available during OMR capture.
         self._schedule_meter_restart(delay=100)
         if self.close_after_stop:
             self._stop()
@@ -588,9 +608,10 @@ class RecorderApp:
                     self._apply_devices(event[1])
                 elif kind == "device_error":
                     self.refresh_button.configure(state="normal")
-                    self.record_button.configure(state="disabled")
-                    self.message_var.set(event[1])
-                    messagebox.showerror("Device enumeration", event[1], parent=self.root)
+                    self.record_button.configure(state="normal" if self.backend else "disabled")
+                    self.message_var.set(
+                        f"Device list unavailable; Record will ask OMR to try Windows defaults. {event[1]}"
+                    )
                 elif kind == "levels":
                     self.mic_meter.set_level(event[1])
                     self.loopback_meter.set_level(event[2])

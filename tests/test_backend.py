@@ -100,5 +100,37 @@ class RecordingOptionsTests(unittest.TestCase):
         self.assertFalse(options.aec_enabled)
 
 
+class RecordingCommandTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.backend = OMRBackend.__new__(OMRBackend)
+        self.backend.omr_executable = Path("omr.exe")
+
+    def options(self, mic: int | None, loopback: int | None) -> RecordingOptions:
+        return RecordingOptions(mic, loopback, Path("recordings"), "MP3", 128)
+
+    def test_both_sources_use_balanced_mix(self) -> None:
+        command, _ = self.backend.build_recording_command(self.options(30, 31))
+        self.assertIn("--mix", command)
+        self.assertIn("--mix-ratio", command)
+        self.assertEqual(command[command.index("--mix-ratio") + 1], "0.5")
+        self.assertIn("--mic-device", command)
+        self.assertIn("--loopback-device", command)
+
+    def test_one_available_source_uses_single_source_mode(self) -> None:
+        mic_command, _ = self.backend.build_recording_command(self.options(30, None))
+        loopback_command, _ = self.backend.build_recording_command(self.options(None, 31))
+        self.assertIn("--mic-only", mic_command)
+        self.assertNotIn("--loopback-device", mic_command)
+        self.assertIn("--loopback-only", loopback_command)
+        self.assertNotIn("--mic-device", loopback_command)
+
+    def test_no_enumerated_sources_leaves_omr_on_default_mixed_mode(self) -> None:
+        command, _ = self.backend.build_recording_command(self.options(None, None))
+        self.assertIn("--mix", command)
+        self.assertEqual(command.count("--mix-ratio"), 1)
+        self.assertNotIn("--mic-device", command)
+        self.assertNotIn("--loopback-device", command)
+
+
 if __name__ == "__main__":
     unittest.main()

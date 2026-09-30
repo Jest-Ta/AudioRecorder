@@ -44,8 +44,8 @@ class AudioDevice:
 
 @dataclass(frozen=True, slots=True)
 class RecordingOptions:
-    mic_index: int
-    loopback_index: int
+    mic_index: int | None
+    loopback_index: int | None
     output_directory: Path
     output_format: str
     bitrate: int
@@ -229,17 +229,34 @@ class OMRBackend:
         command = [
             str(self.omr_executable),
             "start",
-            "--mic-device",
-            str(options.mic_index),
-            "--loopback-device",
-            str(options.loopback_index),
-            "--stereo-split" if options.stereo_split else "--mix",
-            "--aec" if options.aec_enabled else "--no-aec",
-            "--output",
-            str(output_path),
-            "--format",
-            options.output_format.lower(),
         ]
+        if options.mic_index is not None and options.loopback_index is not None:
+            command.extend(["--mix" if not options.stereo_split else "--stereo-split"])
+            # Make the GUI's “mix” choice deterministic and balanced, instead
+            # of inheriting a user's CLI mix ratio that might mute one source.
+            if not options.stereo_split:
+                command.extend(["--mix-ratio", "0.5"])
+        elif options.mic_index is not None:
+            command.append("--mic-only")
+        elif options.loopback_index is not None:
+            command.append("--loopback-only")
+        else:
+            # If the GUI could not enumerate devices, let OMR choose the
+            # Windows defaults itself and attempt its normal dual-source mode.
+            command.extend(["--mix", "--mix-ratio", "0.5"])
+        if options.mic_index is not None:
+            command.extend(["--mic-device", str(options.mic_index)])
+        if options.loopback_index is not None:
+            command.extend(["--loopback-device", str(options.loopback_index)])
+        command.extend(
+            [
+                "--aec" if options.aec_enabled else "--no-aec",
+                "--output",
+                str(output_path),
+                "--format",
+                options.output_format.lower(),
+            ]
+        )
         if options.output_format.upper() == "MP3":
             command.extend(["--bitrate", str(options.bitrate)])
         return command, output_path
