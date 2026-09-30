@@ -66,7 +66,7 @@ class LevelMeter(tk.Canvas):
 class RecorderApp:
     def __init__(self) -> None:
         self.root = tk.Tk()
-        self.root.title("Omni Meeting Recorder")
+        self.root.title("AudioRecorder")
         self.root.geometry("620x540")
         self.root.minsize(570, 500)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -158,29 +158,32 @@ class RecorderApp:
         style.configure("TLabelframe.Label", background="#f4f6fa", foreground="#40495b", font=("Segoe UI Semibold", 9))
 
     def _build_ui(self) -> None:
-        self.root.geometry("660x650")
-        self.root.minsize(610, 620)
+        self.root.geometry("660x670")
+        self.root.minsize(610, 640)
         container = ttk.Frame(self.root, padding=(22, 18, 22, 16))
         container.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         container.columnconfigure(1, weight=1)
 
-        ttk.Label(container, text="New recording", style="Header.TLabel").grid(
-            row=0, column=0, columnspan=3, sticky="w", pady=(0, 10)
+        ttk.Label(container, text="AudioRecorder", style="Header.TLabel").grid(
+            row=0, column=0, columnspan=3, sticky="w"
+        )
+        ttk.Label(container, text="GUI for Omni Meeting Recorder", style="Hint.TLabel").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(0, 10)
         )
         ttk.Label(container, text="MICROPHONE", style="Source.TLabel").grid(
-            row=1, column=0, sticky="w", padx=(0, 12)
+            row=2, column=0, sticky="w", padx=(0, 12)
         )
         self.mic_combo = ttk.Combobox(container, textvariable=self.mic_var, state="readonly")
-        self.mic_combo.grid(row=1, column=1, sticky="ew")
+        self.mic_combo.grid(row=2, column=1, sticky="ew")
         self.mic_combo.bind("<<ComboboxSelected>>", self._on_device_selected)
 
         ttk.Label(container, text="SYSTEM AUDIO", style="Source.TLabel").grid(
-            row=2, column=0, sticky="w", padx=(0, 12), pady=(10, 0)
+            row=3, column=0, sticky="w", padx=(0, 12), pady=(10, 0)
         )
         self.loopback_combo = ttk.Combobox(container, textvariable=self.loopback_var, state="readonly")
-        self.loopback_combo.grid(row=2, column=1, sticky="ew", pady=(10, 0))
+        self.loopback_combo.grid(row=3, column=1, sticky="ew", pady=(10, 0))
         self.loopback_combo.bind("<<ComboboxSelected>>", self._on_device_selected)
         self.refresh_button = ttk.Button(
             container,
@@ -188,31 +191,31 @@ class RecorderApp:
             command=self.refresh_devices,
             style="Secondary.TButton",
         )
-        self.refresh_button.grid(row=1, column=2, rowspan=2, padx=(8, 0))
+        self.refresh_button.grid(row=2, column=2, rowspan=2, padx=(8, 0))
 
-        ttk.Separator(container).grid(row=3, column=0, columnspan=3, sticky="ew", pady=16)
+        ttk.Separator(container).grid(row=4, column=0, columnspan=3, sticky="ew", pady=16)
         ttk.Label(container, text="Mic level", style="Source.TLabel").grid(
-            row=4, column=0, sticky="w", padx=(0, 12)
+            row=5, column=0, sticky="w", padx=(0, 12)
         )
         self.mic_meter = LevelMeter(container)
-        self.mic_meter.grid(row=4, column=1, columnspan=2, sticky="ew")
+        self.mic_meter.grid(row=5, column=1, columnspan=2, sticky="ew")
         ttk.Label(container, text="System level", style="Source.TLabel").grid(
-            row=5, column=0, sticky="w", padx=(0, 12), pady=(9, 0)
+            row=6, column=0, sticky="w", padx=(0, 12), pady=(9, 0)
         )
         self.loopback_meter = LevelMeter(container)
-        self.loopback_meter.grid(row=5, column=1, columnspan=2, sticky="ew", pady=(8, 0))
+        self.loopback_meter.grid(row=6, column=1, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Label(container, textvariable=self.meter_status_var, style="Hint.TLabel").grid(
-            row=6, column=0, columnspan=3, sticky="w", pady=(6, 0)
+            row=7, column=0, columnspan=3, sticky="w", pady=(6, 0)
         )
 
         status_frame = ttk.Frame(container)
-        status_frame.grid(row=7, column=0, columnspan=3, pady=(14, 6))
+        status_frame.grid(row=8, column=0, columnspan=3, pady=(14, 6))
         ttk.Label(status_frame, textvariable=self.timer_var, style="Timer.TLabel").pack()
         self.status_label = ttk.Label(status_frame, textvariable=self.status_var, style="Idle.TLabel")
         self.status_label.pack()
 
         transport = ttk.Frame(container)
-        transport.grid(row=8, column=0, columnspan=3, pady=(4, 3))
+        transport.grid(row=9, column=0, columnspan=3, pady=(4, 3))
         self.record_button = ttk.Button(
             transport, text="●  Record", style="Record.TButton", command=self._record
         )
@@ -229,10 +232,10 @@ class RecorderApp:
             container,
             text="Pause is unavailable in OMR 0.7.2 · Stop always finalises the current file",
             style="Hint.TLabel",
-        ).grid(row=9, column=0, columnspan=3, pady=(2, 10))
+        ).grid(row=10, column=0, columnspan=3, pady=(2, 10))
 
         options = ttk.LabelFrame(container, text="Recording output", padding=12)
-        options.grid(row=10, column=0, columnspan=3, sticky="ew")
+        options.grid(row=11, column=0, columnspan=3, sticky="ew")
         options.columnconfigure(1, weight=1)
         ttk.Label(options, text="Save to").grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.output_entry = ttk.Entry(options, textvariable=self.output_var)
@@ -264,7 +267,7 @@ class RecorderApp:
         self.open_button.grid(row=1, column=2, padx=(8, 0), pady=(8, 0))
 
         self.advanced = ttk.LabelFrame(container, text="Advanced recording", padding=(10, 7))
-        self.advanced.grid(row=12, column=0, columnspan=3, sticky="ew", pady=(5, 0))
+        self.advanced.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(5, 0))
         self.stereo_check = ttk.Checkbutton(
             self.advanced,
             text="Stereo split (left mic / right system)",
@@ -288,10 +291,10 @@ class RecorderApp:
             command=self._toggle_advanced,
             style="Link.TButton",
         )
-        self.advanced_button.grid(row=11, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        self.advanced_button.grid(row=12, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         footer = ttk.Frame(container)
-        footer.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        footer.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         footer.columnconfigure(0, weight=1)
         ttk.Label(footer, textvariable=self.message_var, wraplength=460).grid(row=0, column=0, sticky="w")
         ttk.Button(
@@ -310,7 +313,7 @@ class RecorderApp:
             self.advanced.grid_remove()
             self.advanced_button.configure(text="Advanced settings  ▾")
         self.root.update_idletasks()
-        target_height = max(650, self.root.winfo_reqheight() + 10)
+        target_height = max(670, self.root.winfo_reqheight() + 10)
         self.root.geometry(f"{max(660, self.root.winfo_width())}x{target_height}")
 
     def run(self) -> None:

@@ -15,7 +15,7 @@ if not exist "%UV%" (
     --clean ^
     --onefile ^
     --windowed ^
-    --name "Omni Meeting Recorder" ^
+    --name "AudioRecorder" ^
     --icon "assets\omr_icon.png" ^
     --add-data "assets\omr_icon.png;assets" ^
     --add-data "omr_gui\meter_worker.py;omr_gui" ^
@@ -23,4 +23,4 @@ if not exist "%UV%" (
 
 if errorlevel 1 exit /b %errorlevel%
 echo.
-echo Built: dist\Omni Meeting Recorder.exe
+echo Built: dist\AudioRecorder.exe

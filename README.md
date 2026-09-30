@@ -1,6 +1,10 @@
-# Omni Meeting Recorder GUI
+# AudioRecorder
 
-A compact Windows desktop frontend for the locally installed Omni Meeting Recorder (OMR) 0.7.2. The app keeps OMR's existing recording engine: it launches `omr.exe` directly with the selected microphone and WASAPI loopback source, while a separate lightweight helper reads shared-mode audio only for the two live meters.
+**GUI for Omni Meeting Recorder**
+
+A compact Windows desktop frontend for the locally installed Omni Meeting Recorder (OMR) 0.7.2. AudioRecorder is an independent project and is not affiliated with or endorsed by OMR's maintainers. OMR is a separate MIT-licensed project and is not bundled with AudioRecorder; users must install it separately. See the [Omni Meeting Recorder project](https://github.com/dobachi/omni-meeting-recorder).
+
+The app keeps OMR's existing recording engine: it launches `omr.exe` directly with the selected microphone and WASAPI loopback source, while a separate lightweight helper reads shared-mode audio only for the two live meters.
 
 ## Run it
 
@@ -82,7 +86,11 @@ Run `build_windows.bat` to rebuild the windowed one-file executable. The build u
 The result is:
 
 ```text
-dist\Omni Meeting Recorder.exe
+dist\AudioRecorder.exe
 ```
 
 To add it to the taskbar, right-click the executable and choose **Pin to taskbar**. Windows intentionally reserves that final pinning choice for the signed-in user.
+
+## License
+
+AudioRecorder is licensed under the MIT License; see [LICENSE](LICENSE). This license applies to AudioRecorder's own code, not to Omni Meeting Recorder or other third-party software.

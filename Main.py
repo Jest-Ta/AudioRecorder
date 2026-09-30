@@ -1,4 +1,4 @@
-"""Entry point for the Omni Meeting Recorder desktop GUI."""
+"""Entry point for AudioRecorder, a GUI for Omni Meeting Recorder."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def main() -> int:
         import ctypes
 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "OmniMeetingRecorder.Desktop"
+            "AudioRecorder.Desktop"
         )
 
     from omr_gui.app import RecorderApp

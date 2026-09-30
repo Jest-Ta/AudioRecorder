@@ -5,3 +5,4 @@ __pycache__/
 *.flac
 build/
 *.spec
+dist/Omni Meeting Recorder.exe
