@@ -1,8 +1,16 @@
 # AudioRecorder
 
-**GUI for Omni Meeting Recorder**
+**An independent Windows GUI for Omni Meeting Recorder**
 
-A compact Windows desktop frontend for the locally installed Omni Meeting Recorder (OMR) 0.7.2. AudioRecorder is an independent project and is not affiliated with or endorsed by OMR's maintainers. OMR is a separate MIT-licensed project and is not bundled with AudioRecorder; users must install it separately. See the [Omni Meeting Recorder project](https://github.com/dobachi/omni-meeting-recorder).
+A compact Windows desktop frontend for the locally installed Omni Meeting Recorder (OMR) 0.7.2.
+
+## Important: OMR is not included
+
+AudioRecorder is just a graphical frontend: it launches the separate `omr.exe` from an OMR installation. The packaged `AudioRecorder.exe` does **not** contain or install OMR, its CLI executable, or its Python environment. Install OMR separately first using the [upstream installation instructions](https://github.com/dobachi/omni-meeting-recorder#installation).
+
+This GUI exposes only a subset of OMR's controls. It does not reproduce every OMR CLI command, option, configuration tool, or interactive feature; use the OMR CLI directly when you need its full functionality.
+
+**Upstream credit:** [Omni Meeting Recorder (`dobachi/omni-meeting-recorder`)](https://github.com/dobachi/omni-meeting-recorder) is a separate MIT-licensed project. AudioRecorder is independent and is not affiliated with or endorsed by its maintainers.
 
 The app keeps OMR's existing recording engine: it launches `omr.exe` directly with the selected microphone and WASAPI loopback source, while a separate lightweight helper reads shared-mode audio only for the two live meters.
 
