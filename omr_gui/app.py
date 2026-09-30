@@ -90,6 +90,11 @@ class RecorderApp:
         self.close_after_stop = False
         self.meter_restart_id: str | None = None
         self._last_output: Path | None = None
+        self._last_file_size = 0
+        self._last_file_growth_at = 0.0
+        self._file_growth_warning_shown = False
+        self._process_launched = False
+        self._cancelled_startup = False
 
         self.mic_var = tk.StringVar()
         self.loopback_var = tk.StringVar()
@@ -302,7 +307,7 @@ class RecorderApp:
         ttk.Label(footer, textvariable=self.message_var, wraplength=460).grid(row=0, column=0, sticky="w")
         ttk.Button(
             footer,
-            text="Details",
+            text="Technical details",
             command=self._show_details,
             style="Secondary.TButton",
         ).grid(row=0, column=1)
@@ -415,6 +420,12 @@ class RecorderApp:
         if not self.output_var.get().strip():
             messagebox.showerror("Output directory", "Choose an output directory first.", parent=self.root)
             return
+        self._last_output = None
+        self._last_file_size = 0
+        self._file_growth_warning_shown = False
+        self._process_launched = False
+        self._cancelled_startup = False
+        self.backend.clear_technical_log()
         self.settings.mic_name = mic.name
         self.settings.loopback_name = loopback.name
         self.settings.output_directory = str(output_dir)
@@ -457,23 +468,45 @@ class RecorderApp:
         threading.Thread(target=worker, daemon=True, name="recording-start").start()
 
     def _recording_started(self, path_text: str) -> None:
+        self._process_launched = True
         self._last_output = Path(path_text)
-        self.started_at = time.monotonic()
+        self.started_at = 0.0
         self.timer_var.set("00:00:00")
         self.file_size_var.set("File size: 0.0 B")
+        self._last_file_size = 0
+        self._file_growth_warning_shown = False
+        self._set_state("PREPARING")
+        self.message_var.set("Waiting for OMR to confirm the recording has started…")
+        if self.close_after_stop:
+            self._stop()
+
+    def _recording_ready(self) -> None:
+        if self.state != "PREPARING":
+            return
+        self.started_at = time.monotonic()
+        self._last_file_growth_at = self.started_at
         self._set_state("RECORDING")
-        self.message_var.set(f"Recording to {self._last_output.name}")
-        # OMR's output normally confirms when its capture streams are open.
-        # This fallback also starts meters if a future Rich version suppresses
-        # that line on redirected output.
-        self._schedule_meter_restart(delay=2500)
+        output_name = self._last_output.name if self._last_output else "output file"
+        self.message_var.set(f"Recording to {output_name}")
+        # The meters use separate shared-mode streams and join only after OMR
+        # confirms its own capture streams are open.
+        self._schedule_meter_restart(delay=100)
+        if self.close_after_stop:
+            self._stop()
 
     def _stop(self) -> None:
-        if not self.backend or self.state != "RECORDING":
+        if not self.backend or self.state not in {"RECORDING", "PREPARING"}:
             return
+        was_preparing = self.state == "PREPARING"
         self._set_state("STOPPING")
-        self.message_var.set("Stopping and finalising the recording…")
-        self.backend.request_graceful_stop()
+        self.message_var.set("Cancelling startup…" if was_preparing else "Stopping and finalising the recording…")
+        if was_preparing:
+            self._cancelled_startup = True
+            # No recording has been confirmed yet, so do not send OMR's
+            # interactive stop key into a process that may still be starting.
+            self.backend.force_stop()
+        else:
+            self.backend.request_graceful_stop()
 
     def _set_state(self, state: str) -> None:
         self.state = state
@@ -481,7 +514,7 @@ class RecorderApp:
             self.status_var.set("IDLE")
             self.status_label.configure(style="Idle.TLabel")
             self.record_button.configure(state="normal" if self.mic_devices and self.loopback_devices else "disabled")
-            self.stop_button.configure(state="disabled")
+            self.stop_button.configure(state="disabled", text="Stop")
             self.refresh_button.configure(state="normal")
             self.mic_combo.configure(state="readonly")
             self.loopback_combo.configure(state="readonly")
@@ -495,7 +528,7 @@ class RecorderApp:
             self.status_var.set("●  RECORDING")
             self.status_label.configure(style="Recording.TLabel")
             self.record_button.configure(state="disabled")
-            self.stop_button.configure(state="normal")
+            self.stop_button.configure(state="normal", text="Stop")
             self.refresh_button.configure(state="disabled")
             self.mic_combo.configure(state="disabled")
             self.loopback_combo.configure(state="disabled")
@@ -509,7 +542,10 @@ class RecorderApp:
             self.status_var.set("STOPPING…" if state == "STOPPING" else "PREPARING…")
             self.status_label.configure(style="Stopping.TLabel")
             self.record_button.configure(state="disabled")
-            self.stop_button.configure(state="disabled")
+            self.stop_button.configure(
+                state="normal" if state == "PREPARING" and self._process_launched else "disabled",
+                text="Cancel" if state == "PREPARING" and self._process_launched else "Stop",
+            )
             self.refresh_button.configure(state="disabled")
             self.mic_combo.configure(state="disabled")
             self.loopback_combo.configure(state="disabled")
@@ -527,6 +563,20 @@ class RecorderApp:
             hours, remainder = divmod(elapsed, 3600)
             minutes, seconds = divmod(remainder, 60)
             self.timer_var.set(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+            if (
+                self.state == "RECORDING"
+                and not self._file_growth_warning_shown
+                and time.monotonic() - self._last_file_growth_at >= 5.0
+            ):
+                self._file_growth_warning_shown = True
+                if self._last_file_size == 0:
+                    self.message_var.set(
+                        "No audio data is reaching the file. After sleep/wake, refresh devices and restart."
+                    )
+                else:
+                    self.message_var.set(
+                        "The file has stopped growing. OMR may have lost its audio stream; stop and check devices."
+                    )
         self.root.after(250, self._update_timer)
 
     def _poll_events(self) -> None:
@@ -553,16 +603,31 @@ class RecorderApp:
                 elif kind == "recording_started":
                     self._recording_started(event[1])
                 elif kind == "recording_size":
-                    self.file_size_var.set(f"File size: {format_file_size(int(event[1]))}")
-                elif kind == "omr_ready" and self.state == "RECORDING":
-                    # Recording owns priority; meters join only after OMR has
-                    # successfully opened its shared-mode streams.
-                    self._schedule_meter_restart(delay=100)
+                    size_bytes = int(event[1])
+                    self.file_size_var.set(f"File size: {format_file_size(size_bytes)}")
+                    if size_bytes > self._last_file_size:
+                        self._last_file_growth_at = time.monotonic()
+                        self._file_growth_warning_shown = False
+                        if self.state == "RECORDING" and self._last_output:
+                            self.message_var.set(f"Recording to {self._last_output.name}")
+                    self._last_file_size = size_bytes
+                elif kind == "omr_ready":
+                    self._recording_ready()
                 elif kind == "recording_start_error":
+                    self._process_launched = False
+                    self._cancelled_startup = False
                     self._set_state("IDLE")
                     self.message_var.set(event[1])
-                    messagebox.showerror("Recording could not start", event[1], parent=self.root)
-                    self._schedule_meter_restart()
+                    if self.close_after_stop:
+                        self._destroy()
+                    else:
+                        self._show_recording_diagnostics(
+                            "Recording could not start",
+                            str(event[1]),
+                            self._last_output,
+                            None,
+                        )
+                        self._schedule_meter_restart()
                 elif kind == "recording_exited":
                     self._recording_exited(event[1], Path(event[2]))
                 elif kind == "stop_timeout":
@@ -581,32 +646,57 @@ class RecorderApp:
     def _recording_exited(self, return_code: int, output_path: Path) -> None:
         expected = self.state == "STOPPING"
         was_starting = self.state == "PREPARING"
+        self._process_launched = False
         self._set_state("IDLE")
-        exists = output_path.exists() and output_path.stat().st_size > 0
-        if expected and return_code == 0 and exists:
+        if self._cancelled_startup:
+            self._cancelled_startup = False
+            self.message_var.set("OMR startup cancelled.")
+            if self.close_after_stop:
+                self._destroy()
+            else:
+                self._schedule_meter_restart(delay=500)
+            return
+        try:
+            file_size: int | None = output_path.stat().st_size
+        except OSError:
+            file_size = None
+        if expected and return_code == 0 and file_size is not None and file_size > 0:
             self.message_var.set(f"Saved {output_path.name}")
-        elif expected and exists:
+        elif expected and file_size is not None and file_size > 0:
             self.message_var.set(f"OMR stopped with an error; a partial file remains: {output_path.name}")
-            messagebox.showwarning(
-                "Recording ended with an error",
-                "OMR reported an error while stopping. The recording file was preserved. "
-                "Open Technical details for the OMR output.",
-                parent=self.root,
-            )
+            if not self.close_after_stop:
+                self._show_recording_diagnostics(
+                    "Recording ended with an error",
+                    "OMR reported an error while stopping. A partial recording was preserved.",
+                    output_path,
+                    return_code,
+                    file_size,
+                )
         elif was_starting or not expected:
             self.message_var.set("OMR ended unexpectedly.")
-            messagebox.showerror(
-                "Recording ended unexpectedly",
-                "OMR exited before Stop was requested. Open Technical details for the OMR output.",
-                parent=self.root,
-            )
+            if not self.close_after_stop:
+                self._show_recording_diagnostics(
+                    "Recording ended unexpectedly",
+                    "OMR exited before the recording could be confirmed or before Stop was requested.",
+                    output_path,
+                    return_code,
+                    file_size,
+                )
         else:
-            self.message_var.set("OMR stopped, but no completed recording file was found.")
-            messagebox.showerror(
-                "Recording not finalised",
-                "No completed recording was found. Open Technical details before trying again.",
-                parent=self.root,
-            )
+            if file_size is None:
+                detail = "OMR exited, but the expected recording file was not found."
+                self.message_var.set("OMR stopped, but the recording file was not found.")
+            else:
+                detail = f"The expected file exists but is empty (0 bytes): {output_path}"
+                self.message_var.set("OMR stopped, but the recording file is empty (0 bytes).")
+            if not self.close_after_stop:
+                self._show_recording_diagnostics(
+                    "Recording not finalised",
+                    detail,
+                    output_path,
+                    return_code,
+                    file_size,
+                )
         if self.close_after_stop:
             self._destroy()
         else:
@@ -697,23 +787,80 @@ class RecorderApp:
         text.insert("1.0", content)
         text.configure(state="disabled")
 
+    def _show_recording_diagnostics(
+        self,
+        title: str,
+        summary: str,
+        output_path: Path | None,
+        return_code: int | None,
+        file_size: int | None = None,
+    ) -> None:
+        """Show the failure and captured OMR output together, without hidden navigation."""
+        window = tk.Toplevel(self.root)
+        window.title(title)
+        window.geometry("760x520")
+        window.minsize(620, 380)
+        window.transient(self.root)
+
+        frame = ttk.Frame(window, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=summary, wraplength=710, style="Source.TLabel").pack(anchor="w")
+        if output_path is not None:
+            if file_size is None:
+                file_status = "missing or unavailable"
+            else:
+                file_status = f"{format_file_size(file_size)} ({file_size:,} bytes)"
+            ttk.Label(
+                frame,
+                text=f"Expected file: {output_path}\nFile status: {file_status}\nOMR exit code: {return_code}",
+                wraplength=710,
+                justify="left",
+            ).pack(anchor="w", pady=(8, 10))
+        else:
+            exit_text = return_code if return_code is not None else "not launched"
+            ttk.Label(frame, text=f"OMR exit code: {exit_text}").pack(
+                anchor="w", pady=(8, 10)
+            )
+
+        log_frame = ttk.Frame(frame)
+        log_frame.pack(fill="both", expand=True)
+        text = tk.Text(log_frame, wrap="word", font=("Consolas", 9), height=16)
+        scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scrollbar.set)
+        text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        log_content = self.backend.technical_log() if self.backend else "OMR backend is unavailable."
+        report = (
+            f"{title}\n{summary}\n"
+            f"Expected file: {output_path or 'not created'}\n"
+            f"File status: {file_status if output_path is not None else 'not available'}\n"
+            f"OMR exit code: {return_code if return_code is not None else 'not launched'}\n\n"
+            f"Captured OMR output:\n{log_content}"
+        )
+        text.insert("1.0", log_content)
+        text.configure(state="disabled")
+
+        actions = ttk.Frame(frame)
+        actions.pack(fill="x", pady=(10, 0))
+
+        def copy_report() -> None:
+            window.clipboard_clear()
+            window.clipboard_append(report)
+            window.update_idletasks()
+
+        ttk.Button(actions, text="Copy diagnostic report", command=copy_report).pack(side="left")
+        ttk.Button(actions, text="Close", command=window.destroy).pack(side="right")
+
     def _on_close(self) -> None:
         if self.state in {"RECORDING", "STOPPING", "PREPARING"}:
-            if self.state == "PREPARING":
-                messagebox.showinfo(
-                    "Recording is preparing",
-                    "Please wait until OMR has started or reported an error before closing.",
-                    parent=self.root,
-                )
-                return
             should_stop = messagebox.askyesno(
                 "Recording in progress",
-                "Stop and finalise the active recording, then exit?",
+                "Cancel startup or stop and finalise the active recording, then exit?",
                 parent=self.root,
             )
             if should_stop:
                 self.close_after_stop = True
-                if self.state == "RECORDING":
+                if self.state != "PREPARING" or self._process_launched:
                     self._stop()
             return
         self._destroy()

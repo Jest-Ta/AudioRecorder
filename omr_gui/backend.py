@@ -68,6 +68,7 @@ class OMRBackend:
         self.omr_executable = self._find_omr_executable()
         self.omr_python = self._find_omr_python()
         self.recording_process: subprocess.Popen[str] | None = None
+        self.recording_output_thread: threading.Thread | None = None
         self.meter_process: subprocess.Popen[str] | None = None
         self._record_lock = threading.Lock()
         self._meter_lock = threading.Lock()
@@ -284,12 +285,14 @@ class OMRBackend:
         # failure cannot race an "exited" event ahead of "started".
         self.events.put(("recording_started", str(output_path)))
 
-        threading.Thread(
+        output_thread = threading.Thread(
             target=self._read_recording_output,
             args=(process,),
             daemon=True,
             name="omr-output",
-        ).start()
+        )
+        self.recording_output_thread = output_thread
+        output_thread.start()
         threading.Thread(
             target=self._watch_recording,
             args=(process, output_path),
@@ -321,12 +324,20 @@ class OMRBackend:
                 break
             self._queue_recording_size(output_path)
 
+        # Drain the child's final stdout/stderr lines before emitting its exit
+        # event, so the UI can show the real OMR failure in its diagnostic box.
+        output_thread = getattr(self, "recording_output_thread", None)
+        if output_thread and output_thread is not threading.current_thread():
+            output_thread.join(timeout=2)
+
         # Include the final size after OMR has flushed headers and closed the
         # encoder, which can increase a WAV file slightly during finalisation.
         self._queue_recording_size(output_path)
         with self._record_lock:
             if self.recording_process is process:
                 self.recording_process = None
+            if getattr(self, "recording_output_thread", None) is output_thread:
+                self.recording_output_thread = None
         self.events.put(("recording_exited", return_code, str(output_path)))
 
     def _queue_recording_size(self, output_path: Path) -> None:
@@ -380,6 +391,9 @@ class OMRBackend:
 
     def technical_log(self) -> str:
         return "\n".join(self.log_lines) or "No OMR output has been captured."
+
+    def clear_technical_log(self) -> None:
+        self.log_lines.clear()
 
     def shutdown(self) -> None:
         self.stop_metering()
