@@ -17,6 +17,7 @@ from .backend import (
     OMRBackend,
     RecordingOptions,
     find_device_by_name,
+    format_file_size,
 )
 from .settings import AppSettings, SettingsStore
 
@@ -97,6 +98,7 @@ class RecorderApp:
         self.bitrate_var = tk.StringVar(value=f"{self.settings.mp3_bitrate} kbps")
         self.status_var = tk.StringVar(value="IDLE")
         self.timer_var = tk.StringVar(value="00:00:00")
+        self.file_size_var = tk.StringVar(value="File size: —")
         self.message_var = tk.StringVar(value="Starting…")
         self.meter_status_var = tk.StringVar(value="Initialising live meters…")
         self.aec_var = tk.BooleanVar(value=self.settings.aec_enabled)
@@ -158,8 +160,8 @@ class RecorderApp:
         style.configure("TLabelframe.Label", background="#f4f6fa", foreground="#40495b", font=("Segoe UI Semibold", 9))
 
     def _build_ui(self) -> None:
-        self.root.geometry("660x670")
-        self.root.minsize(610, 640)
+        self.root.geometry("660x680")
+        self.root.minsize(610, 650)
         container = ttk.Frame(self.root, padding=(22, 18, 22, 16))
         container.grid(row=0, column=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
@@ -213,6 +215,7 @@ class RecorderApp:
         ttk.Label(status_frame, textvariable=self.timer_var, style="Timer.TLabel").pack()
         self.status_label = ttk.Label(status_frame, textvariable=self.status_var, style="Idle.TLabel")
         self.status_label.pack()
+        ttk.Label(status_frame, textvariable=self.file_size_var, style="Hint.TLabel").pack()
 
         transport = ttk.Frame(container)
         transport.grid(row=9, column=0, columnspan=3, pady=(4, 3))
@@ -313,7 +316,7 @@ class RecorderApp:
             self.advanced.grid_remove()
             self.advanced_button.configure(text="Advanced settings  ▾")
         self.root.update_idletasks()
-        target_height = max(670, self.root.winfo_reqheight() + 10)
+        target_height = max(680, self.root.winfo_reqheight() + 10)
         self.root.geometry(f"{max(660, self.root.winfo_width())}x{target_height}")
 
     def run(self) -> None:
@@ -457,6 +460,7 @@ class RecorderApp:
         self._last_output = Path(path_text)
         self.started_at = time.monotonic()
         self.timer_var.set("00:00:00")
+        self.file_size_var.set("File size: 0.0 B")
         self._set_state("RECORDING")
         self.message_var.set(f"Recording to {self._last_output.name}")
         # OMR's output normally confirms when its capture streams are open.
@@ -548,6 +552,8 @@ class RecorderApp:
                     self.meter_status_var.set(str(event[1]))
                 elif kind == "recording_started":
                     self._recording_started(event[1])
+                elif kind == "recording_size":
+                    self.file_size_var.set(f"File size: {format_file_size(int(event[1]))}")
                 elif kind == "omr_ready" and self.state == "RECORDING":
                     # Recording owns priority; meters join only after OMR has
                     # successfully opened its shared-mode streams.

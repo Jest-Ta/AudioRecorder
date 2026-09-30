@@ -312,11 +312,29 @@ class OMRBackend:
                 self.events.put(("omr_ready",))
 
     def _watch_recording(self, process: subprocess.Popen[str], output_path: Path) -> None:
-        return_code = process.wait()
+        while True:
+            try:
+                return_code = process.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                pass
+            else:
+                break
+            self._queue_recording_size(output_path)
+
+        # Include the final size after OMR has flushed headers and closed the
+        # encoder, which can increase a WAV file slightly during finalisation.
+        self._queue_recording_size(output_path)
         with self._record_lock:
             if self.recording_process is process:
                 self.recording_process = None
         self.events.put(("recording_exited", return_code, str(output_path)))
+
+    def _queue_recording_size(self, output_path: Path) -> None:
+        try:
+            size_bytes = output_path.stat().st_size
+        except OSError:
+            return
+        self.events.put(("recording_size", size_bytes))
 
     def request_graceful_stop(self, timeout: float = 12.0) -> None:
         with self._record_lock:
@@ -377,6 +395,16 @@ def unique_output_path(directory: Path, extension: str, now: datetime | None = N
         if not candidate.exists():
             return candidate
     raise BackendError("Could not create a unique recording filename.")
+
+
+def format_file_size(size_bytes: int) -> str:
+    """Format a file size like OMR's live recording status panel."""
+    size = float(max(0, size_bytes))
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 def find_device_by_name(devices: list[AudioDevice], name: str) -> AudioDevice | None:
