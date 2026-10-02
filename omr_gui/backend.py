@@ -51,6 +51,7 @@ class RecordingOptions:
     bitrate: int
     stereo_split: bool = False
     aec_enabled: bool = False
+    output_title: str | None = None
 
 
 class BackendError(RuntimeError):
@@ -225,7 +226,14 @@ class OMRBackend:
                 process.kill()
 
     def build_recording_command(self, options: RecordingOptions) -> tuple[list[str], Path]:
-        output_path = unique_output_path(options.output_directory, options.output_format.lower())
+        if options.output_title:
+            output_path = unique_named_output_path(
+                options.output_directory,
+                options.output_title,
+                options.output_format.lower(),
+            )
+        else:
+            output_path = unique_output_path(options.output_directory, options.output_format.lower())
         command = [
             str(self.omr_executable),
             "start",
@@ -417,15 +425,51 @@ class OMRBackend:
 
 
 def unique_output_path(directory: Path, extension: str, now: datetime | None = None) -> Path:
+    title = automatic_output_title(now)
+    return unique_named_output_path(directory, title, extension)
+
+
+def automatic_output_title(now: datetime | None = None) -> str:
     timestamp = (now or datetime.now()).strftime("%Y-%m-%d_%H-%M-%S")
-    base = directory / f"OMR_{timestamp}.{extension}"
+    return f"OMR_{timestamp}"
+
+
+def normalize_recording_title(title: str, extension: str) -> str:
+    """Validate a Windows-safe recording title and strip its chosen extension."""
+    cleaned = title.strip()
+    selected_extension = f".{extension.lstrip('.').lower()}"
+    typed_extension = Path(cleaned).suffix.lower()
+    if typed_extension in {".mp3", ".wav"}:
+        if typed_extension != selected_extension:
+            raise BackendError(
+                f"The selected format is {selected_extension}; remove the {typed_extension} extension."
+            )
+        cleaned = cleaned[: -len(typed_extension)]
+    if not cleaned:
+        raise BackendError("Enter a file name, or choose the automatic name.")
+    if any(ord(char) < 32 or char in '<>:\\"/\\|?*' for char in cleaned):
+        raise BackendError('File names cannot contain: < > : " / \\ | ? *')
+    if cleaned.endswith((" ", ".")):
+        raise BackendError("A file name cannot end with a space or period.")
+    if len(cleaned) > 180:
+        raise BackendError("Keep the file name to 180 characters or fewer.")
+    reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    if cleaned.split(".", 1)[0].upper() in reserved:
+        raise BackendError("That name is reserved by Windows; choose a different file name.")
+    return cleaned
+
+
+def unique_named_output_path(directory: Path, title: str, extension: str) -> Path:
+    cleaned = normalize_recording_title(title, extension)
+    extension = extension.lstrip(".").lower()
+    base = directory / f"{cleaned}.{extension}"
     if not base.exists():
         return base
     for suffix in range(2, 10_000):
-        candidate = directory / f"OMR_{timestamp}_{suffix}.{extension}"
+        candidate = directory / f"{cleaned}_{suffix}.{extension}"
         if not candidate.exists():
             return candidate
-    raise BackendError("Could not create a unique recording filename.")
+    raise BackendError("Could not create a unique recording file name.")
 
 
 def format_file_size(size_bytes: int) -> str:

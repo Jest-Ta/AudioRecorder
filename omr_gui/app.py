@@ -16,8 +16,10 @@ from .backend import (
     BackendError,
     OMRBackend,
     RecordingOptions,
+    automatic_output_title,
     find_device_by_name,
     format_file_size,
+    normalize_recording_title,
 )
 from .settings import AppSettings, SettingsStore
 
@@ -432,6 +434,10 @@ class RecorderApp:
         if not self.output_var.get().strip():
             messagebox.showerror("Output directory", "Choose an output directory first.", parent=self.root)
             return
+        output_format = self.format_var.get().lower()
+        output_title = self._prompt_recording_title(output_format)
+        if output_title is None:
+            return
         self._last_output = None
         self._last_file_size = 0
         self._file_growth_warning_shown = False
@@ -481,12 +487,67 @@ class RecorderApp:
                     bitrate=bitrate,
                     stereo_split=self.stereo_var.get(),
                     aec_enabled=self.aec_var.get(),
+                    output_title=output_title,
                 )
                 self.backend.start_recording(options)
             except (BackendError, OSError, ValueError) as exc:
                 self.events.put(("recording_start_error", str(exc)))
 
         threading.Thread(target=worker, daemon=True, name="recording-start").start()
+
+    def _prompt_recording_title(self, extension: str) -> str | None:
+        automatic_title = automatic_output_title()
+        result: dict[str, str | None] = {"title": None}
+
+        window = tk.Toplevel(self.root)
+        window.title("Name this recording")
+        window.geometry("500x205")
+        window.resizable(False, False)
+        window.transient(self.root)
+
+        frame = ttk.Frame(window, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Recording file name", style="Source.TLabel").pack(anchor="w")
+        title_var = tk.StringVar(value=automatic_title)
+        entry = ttk.Entry(frame, textvariable=title_var, font=("Segoe UI", 10))
+        entry.pack(fill="x", pady=(8, 4))
+        ttk.Label(
+            frame,
+            text=f"The .{extension} extension will be added automatically.",
+            style="Hint.TLabel",
+        ).pack(anchor="w")
+
+        actions = ttk.Frame(frame)
+        actions.pack(fill="x", pady=(18, 0))
+
+        def finish(use_automatic: bool = False) -> None:
+            candidate = automatic_title if use_automatic else title_var.get()
+            try:
+                normalized = normalize_recording_title(candidate, extension)
+            except BackendError as exc:
+                messagebox.showerror("Invalid file name", str(exc), parent=window)
+                entry.focus_set()
+                return
+            result["title"] = normalized
+            window.destroy()
+
+        ttk.Button(actions, text="Use automatic name", command=lambda: finish(True)).pack(side="left")
+        ttk.Button(actions, text="Cancel", command=window.destroy, style="Secondary.TButton").pack(
+            side="right", padx=(8, 0)
+        )
+        ttk.Button(actions, text="Use this name", command=finish).pack(side="right")
+        entry.bind("<Return>", lambda _event: finish())
+        window.bind("<Escape>", lambda _event: window.destroy())
+        window.protocol("WM_DELETE_WINDOW", window.destroy)
+        window.grab_set()
+
+        def focus_and_select() -> None:
+            entry.focus_set()
+            entry.selection_range(0, tk.END)
+
+        window.after(50, focus_and_select)
+        self.root.wait_window(window)
+        return result["title"]
 
     def _recording_started(self, path_text: str) -> None:
         self._process_launched = True

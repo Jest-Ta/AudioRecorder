@@ -10,10 +10,14 @@ from pathlib import Path
 
 from omr_gui.backend import (
     AudioDevice,
+    BackendError,
     OMRBackend,
     RecordingOptions,
+    automatic_output_title,
     find_device_by_name,
     format_file_size,
+    normalize_recording_title,
+    unique_named_output_path,
     unique_output_path,
 )
 
@@ -33,6 +37,29 @@ class OutputNameTests(unittest.TestCase):
             first.touch()
             result = unique_output_path(root, "wav", datetime(2026, 9, 29, 12, 34, 56))
             self.assertEqual(result.name, "OMR_2026-09-29_12-34-56_2.wav")
+
+    def test_custom_title_gets_selected_extension_and_collision_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Planning Session.mp3").touch()
+            result = unique_named_output_path(root, "Planning Session", "mp3")
+            self.assertEqual(result.name, "Planning Session_2.mp3")
+
+    def test_typed_matching_extension_is_not_duplicated(self) -> None:
+        self.assertEqual(normalize_recording_title("Interview.MP3", "mp3"), "Interview")
+
+    def test_mismatched_format_extension_is_rejected(self) -> None:
+        with self.assertRaisesRegex(BackendError, "selected format is .mp3"):
+            normalize_recording_title("Interview.wav", "mp3")
+
+    def test_windows_invalid_and_reserved_names_are_rejected(self) -> None:
+        for title in ("", "room/meeting", "CON", "bad?"):
+            with self.subTest(title=title), self.assertRaises(BackendError):
+                normalize_recording_title(title, "mp3")
+
+    def test_automatic_title_is_a_filename_stem(self) -> None:
+        title = automatic_output_title(datetime(2026, 10, 2, 14, 35, 0))
+        self.assertEqual(title, "OMR_2026-10-02_14-35-00")
 
 
 class FileSizeFormatTests(unittest.TestCase):
@@ -130,6 +157,20 @@ class RecordingCommandTests(unittest.TestCase):
         self.assertEqual(command.count("--mix-ratio"), 1)
         self.assertNotIn("--mic-device", command)
         self.assertNotIn("--loopback-device", command)
+
+    def test_custom_title_is_used_for_the_output_path(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            options = RecordingOptions(
+                30,
+                31,
+                Path(directory),
+                "MP3",
+                128,
+                output_title="Team meeting",
+            )
+            command, output_path = self.backend.build_recording_command(options)
+            self.assertEqual(output_path.name, "Team meeting.mp3")
+            self.assertEqual(command[command.index("--output") + 1], str(output_path))
 
 
 if __name__ == "__main__":
